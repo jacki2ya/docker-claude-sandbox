@@ -6,6 +6,7 @@ TOKEN_FILE="${CLAUDE_SANDBOX_TOKEN_FILE:-$HOME/.claude-sandbox/oauth-token}"
 MEMORY="${CLAUDE_SANDBOX_MEMORY:-8g}"
 CPUS="${CLAUDE_SANDBOX_CPUS:-4}"
 PIDS="${CLAUDE_SANDBOX_PIDS:-1024}"
+MODEL="${CLAUDE_SANDBOX_MODEL:-claude-opus-4-7}"
 
 usage() {
     cat <<EOF
@@ -29,6 +30,7 @@ Environment overrides:
   CLAUDE_SANDBOX_MEMORY       Memory limit      (default: 8g)
   CLAUDE_SANDBOX_CPUS         CPU limit         (default: 4)
   CLAUDE_SANDBOX_PIDS         Max processes     (default: 1024)
+  CLAUDE_SANDBOX_MODEL        Claude model      (default: claude-opus-4-7; set empty to use Claude's default)
 
 First-time setup:
   1. claude setup-token      # on the host, generates a long-lived OAuth token
@@ -137,6 +139,7 @@ DOCKER_ARGS+=(
     --workdir /workspace
     -v "$PROJECT_DIR:/workspace"
     -e CLAUDE_CODE_OAUTH_TOKEN
+    -e "CLAUDE_SANDBOX_MODEL=$MODEL"
     -e "GIT_AUTHOR_NAME=$GIT_NAME"
     -e "GIT_AUTHOR_EMAIL=$GIT_EMAIL"
     -e "GIT_COMMITTER_NAME=$GIT_NAME"
