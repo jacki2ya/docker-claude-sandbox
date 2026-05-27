@@ -141,6 +141,13 @@ CONTAINER_OUT="$("$LAUNCHER" "$TEST_DIR" -- bash -c '
     echo "HOST_USERS_VISIBLE=$([ -d /Users ] && echo yes || echo no)"
     echo "CLAUDE_BIN=$(command -v claude || echo missing)"
     echo "SUDO_NOPASSWD=$(sudo -n true 2>/dev/null && echo yes || echo no)"
+    # --- infra/secrets tooling baked into the image ---
+    echo "SOPS_BIN=$(command -v sops || echo missing)"
+    echo "AGE_BIN=$(command -v age || echo missing)"
+    echo "TERRAFORM_BIN=$(command -v terraform || echo missing)"
+    echo "SOPS_VERSION_RUNS=$(sops --version >/dev/null 2>&1 && echo yes || echo no)"
+    echo "AGE_VERSION_RUNS=$(age --version >/dev/null 2>&1 && echo yes || echo no)"
+    echo "TERRAFORM_VERSION_RUNS=$(terraform version >/dev/null 2>&1 && echo yes || echo no)"
     # --- self-awareness baked into the image ---
     # Meaningful hostname (vs random hash) and project-name env var; both come
     # from the launcher. Statusline script + baked settings.json + baked
@@ -225,6 +232,19 @@ if [ -n "$CLAUDE_BIN" ] && [ "$CLAUDE_BIN" != "missing" ]; then
 else
     fail "claude binary on PATH" "got '$CLAUDE_BIN'"
 fi
+
+# Infra/secrets tooling baked into the image: presence on PATH + binary runs.
+for tool in SOPS AGE TERRAFORM; do
+    bin="$(printf '%s\n' "$CONTAINER_OUT" | grep -E "^${tool}_BIN=" | head -1 | cut -d= -f2-)"
+    if [ -n "$bin" ] && [ "$bin" != "missing" ]; then
+        pass "$(echo "$tool" | tr '[:upper:]' '[:lower:]') binary on PATH ($bin)"
+    else
+        fail "$(echo "$tool" | tr '[:upper:]' '[:lower:]') binary on PATH" "got '$bin'"
+    fi
+done
+check_kv SOPS_VERSION_RUNS yes
+check_kv AGE_VERSION_RUNS yes
+check_kv TERRAFORM_VERSION_RUNS yes
 
 # ----- round-trip -----
 section "Round-trip to host"

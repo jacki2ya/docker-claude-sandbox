@@ -80,6 +80,8 @@ claude-sandbox -- claude --help
 - Debian bookworm-slim base
 - Node.js LTS, Python 3, build-essential
 - git, curl, wget, jq, ripgrep, fd, vim-tiny, nano, openssh-client
+- Infra/secrets tooling: `terraform` (HashiCorp APT repo), `sops` (pinned
+  binary, `SOPS_VERSION` build-arg overrides), `age`
 - `@anthropic-ai/claude-code` (npm global)
 - Non-root user `claude` (UID 1000) with NOPASSWD sudo for installing packages
   mid-session
