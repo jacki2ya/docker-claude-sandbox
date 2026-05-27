@@ -69,6 +69,7 @@ claude-sandbox -- claude --help
 |---|---|---|
 | `CLAUDE_SANDBOX_IMAGE` | `claude-sandbox:latest` | Image tag to run |
 | `CLAUDE_SANDBOX_TOKEN_FILE` | `~/.claude-sandbox/oauth-token` | Host path to the OAuth token |
+| `CLAUDE_SANDBOX_PROJECTS_DIR` | `~/.claude/projects` | Host Claude Code projects dir to share memory + transcripts with |
 | `CLAUDE_SANDBOX_MEMORY` | `8g` | Container memory limit |
 | `CLAUDE_SANDBOX_CPUS` | `4` | Container CPU limit |
 | `CLAUDE_SANDBOX_PIDS` | `1024` | Max processes in the container (fork-bomb cap) |
@@ -124,11 +125,37 @@ boundary. Use only with trusted repositories.
 
 ## Persistence
 
-State inside the container is fully ephemeral. Each `claude-sandbox` run
-launches a fresh `/home/claude` and discards it on exit. Only `/workspace`
-(your bind-mounted project) persists. If you `npm install` or `pip install`
-something inside the container, it goes away — install into the project
-directory (`node_modules/`, a venv) so it survives.
+Most of the container is ephemeral — a fresh `/home/claude` every run.
+Three things survive:
+
+1. **`/workspace`** — your bind-mounted project. Anything Claude writes here
+   lands on the host directly.
+2. **Claude's auto-memory** — the user/project/feedback notes Claude saves
+   between sessions.
+3. **Conversation transcripts** — the `.jsonl` files that power
+   `claude --continue` and `claude --resume`.
+
+(2) and (3) live in the same place native Claude Code uses on the host:
+`~/.claude/projects/<host-slug>/`, where `<host-slug>` is the project's
+physical absolute path with every non-alphanumeric character replaced by
+`-` (e.g. `/Users/me/code/foo` → `-Users-me-code-foo`). This means:
+
+- Memory you built up running `claude` directly on the host is immediately
+  available inside the sandbox — no migration step.
+- Memory the sandbox writes is visible to subsequent native `claude` runs
+  too. One pool per project, shared between native and sandboxed sessions.
+- Different projects get different slugs and are fully isolated.
+- Wipe a project's memory with `rm -rf ~/.claude/projects/<host-slug>`.
+
+The sandbox only mounts the leaf slug dir, not the whole `~/.claude/` tree
+— so siblings stay untouched and host-private. **Not persisted** (and not
+visible inside the container): `~/.claude/settings.json`,
+`~/.claude/history.jsonl` (global prompt history), other projects'
+slug dirs, and the runtime/cache/telemetry subdirs (`sessions/`, `todos/`,
+`shell-snapshots/`, `file-history/`, `statsig/`, `cache/`).
+
+If you `npm install` or `pip install` inside the container it goes away —
+install into the project directory (`node_modules/`, a venv) so it survives.
 
 ## Pushing to git
 
