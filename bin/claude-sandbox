@@ -3,6 +3,7 @@ set -euo pipefail
 
 IMAGE="${CLAUDE_SANDBOX_IMAGE:-claude-sandbox:latest}"
 TOKEN_FILE="${CLAUDE_SANDBOX_TOKEN_FILE:-$HOME/.claude-sandbox/oauth-token}"
+PROJECTS_DIR="${CLAUDE_SANDBOX_PROJECTS_DIR:-$HOME/.claude/projects}"
 MEMORY="${CLAUDE_SANDBOX_MEMORY:-8g}"
 CPUS="${CLAUDE_SANDBOX_CPUS:-4}"
 PIDS="${CLAUDE_SANDBOX_PIDS:-1024}"
@@ -26,7 +27,8 @@ e.g. 'claude-sandbox -- claude --help'.
 
 Environment overrides:
   CLAUDE_SANDBOX_IMAGE        Image tag         (default: claude-sandbox:latest)
-  CLAUDE_SANDBOX_TOKEN_FILE   OAuth token path  (default: ~/.claude-sandbox/oauth-token)
+  CLAUDE_SANDBOX_TOKEN_FILE    OAuth token path     (default: ~/.claude-sandbox/oauth-token)
+  CLAUDE_SANDBOX_PROJECTS_DIR  Host CC projects dir (default: ~/.claude/projects)
   CLAUDE_SANDBOX_MEMORY       Memory limit      (default: 8g)
   CLAUDE_SANDBOX_CPUS         CPU limit         (default: 4)
   CLAUDE_SANDBOX_PIDS         Max processes     (default: 1024)
@@ -80,7 +82,7 @@ if [ ! -d "$PROJECT_DIR" ]; then
     echo "ERROR: project directory does not exist: $PROJECT_DIR" >&2
     exit 1
 fi
-PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
 
 if [ ! -f "$TOKEN_FILE" ]; then
     cat >&2 <<EOF
@@ -126,6 +128,18 @@ GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
 SAFE_BASENAME="$(basename "$PROJECT_DIR" | tr -c 'A-Za-z0-9._-' '-')"
 CONTAINER_NAME="claude-sandbox-${SAFE_BASENAME}-$$"
 
+# Claude Code keys its per-project storage on the cwd: slug = '-' + cwd with
+# every non-alphanumeric char turned into '-'. Inside the container the cwd
+# is /workspace so the slug is -workspace; on the host it's the project's
+# physical abs path slugged the same way. Bind-mounting the host slug dir
+# onto the container slug dir unifies memory + transcripts between native
+# `claude` and sandboxed sessions. Only the leaf is mounted, so siblings
+# under ~/.claude (settings.json, history.jsonl, sessions/, ...) stay
+# ephemeral and host-isolated.
+HOST_SLUG="$(printf '%s' "$PROJECT_DIR" | tr -c 'A-Za-z0-9' '-')"
+HOST_SLUG_DIR="$PROJECTS_DIR/$HOST_SLUG"
+mkdir -p "$HOST_SLUG_DIR"
+
 DOCKER_ARGS=(run --rm -i)
 if [ -t 0 ] && [ -t 1 ]; then
     DOCKER_ARGS+=(-t)
@@ -138,6 +152,7 @@ DOCKER_ARGS+=(
     --pids-limit "$PIDS"
     --workdir /workspace
     -v "$PROJECT_DIR:/workspace"
+    -v "$HOST_SLUG_DIR:/home/claude/.claude/projects/-workspace"
     -e CLAUDE_CODE_OAUTH_TOKEN
     -e "CLAUDE_SANDBOX_MODEL=$MODEL"
     -e "GIT_AUTHOR_NAME=$GIT_NAME"

@@ -21,6 +21,16 @@ EOF
     exit 1
 fi
 
+# Docker creates bind-mount parent dirs (~/.claude, ~/.claude/projects) as
+# root at container-creation time. Reclaim ownership non-recursively so the
+# claude user can write siblings like settings.json next to the mounted
+# projects/-workspace leaf. Never touches the mount target itself.
+for d in "$HOME/.claude" "$HOME/.claude/projects"; do
+    if [ -d "$d" ] && [ "$(stat -c %u "$d" 2>/dev/null)" != "$(id -u)" ]; then
+        sudo chown "$(id -u):$(id -g)" "$d"
+    fi
+done
+
 if [ ! -f "$HOME/.claude.json" ]; then
     cat > "$HOME/.claude.json" <<'JSON'
 {
