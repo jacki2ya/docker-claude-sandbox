@@ -69,7 +69,8 @@ claude-sandbox -- claude --help
 |---|---|---|
 | `CLAUDE_SANDBOX_IMAGE` | `claude-sandbox:latest` | Image tag to run |
 | `CLAUDE_SANDBOX_TOKEN_FILE` | `~/.claude-sandbox/oauth-token` | Host path to the OAuth token |
-| `CLAUDE_SANDBOX_PROJECTS_DIR` | `~/.claude/projects` | Host Claude Code projects dir to share memory + transcripts with |
+| `CLAUDE_SANDBOX_PROJECTS_DIR` | `~/.claude/projects` | Host Claude Code **projects** dir to share memory + transcripts with |
+| `CLAUDE_SANDBOX_PROJECT_NAME` | basename of `PROJECT_DIR` | Project label passed into the container (status line, env hint); auto-set by the launcher, override only if you want a custom display name |
 | `CLAUDE_SANDBOX_MEMORY` | `8g` | Container memory limit |
 | `CLAUDE_SANDBOX_CPUS` | `4` | Container CPU limit |
 | `CLAUDE_SANDBOX_PIDS` | `1024` | Max processes in the container (fork-bomb cap) |
@@ -84,6 +85,29 @@ claude-sandbox -- claude --help
   mid-session
 - `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` set
   by default
+- A baked `~/.claude/CLAUDE.md` that tells every session it's running inside an
+  ephemeral sandbox, what's persisted, and why `git push` won't work — so
+  Claude doesn't need to be reminded each time
+- A baked `~/.claude/settings.json` wiring up a status line script
+  (`/usr/local/bin/claude-statusline`) that renders
+  `sandbox / <project> / <branch> / <model>` along the bottom of the TUI
+
+## Session UX
+
+A few small things the launcher does so a sandboxed session doesn't feel
+anonymous:
+
+- **Container hostname** is set to a sanitised form of the project basename
+  (e.g. `claude-sandbox-self-awareness` instead of a random hex hash), so
+  `hostname` inside the container, `docker ps`, and shell prompts all
+  identify the project at a glance.
+- **Terminal title** is set to `claude-sandbox: <project>` at launch via an
+  OSC escape, instead of the very long `docker run …` command line.
+  Claude takes over the title with its own context-aware values once the
+  session starts.
+- **Status line** shows a literal `sandbox` tag so host (`claude`) sessions
+  and sandboxed sessions are visually distinct, alongside project, branch,
+  and model.
 
 ## Threat model
 

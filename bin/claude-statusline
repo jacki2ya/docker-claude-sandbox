@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Status line for Claude Code inside claude-sandbox.
+#
+# Claude pipes a JSON object on stdin describing the current session; we print
+# ONE line to stdout. statusLine hides stderr and blanks the line on non-zero
+# exit or empty output, so this script must:
+#   - never exit non-zero
+#   - tolerate missing keys, missing jq, missing git, non-git cwd, garbage JSON
+#
+# Output: "sandbox / <project> / <branch> / <model> [/ <ctx>%]"
+
+# Deliberately no `set -e`: every field is best-effort.
+exec 2>/dev/null
+
+input="$(cat)"
+
+model=""
+cwd=""
+repo_name=""
+ctx_raw=""
+
+if command -v jq >/dev/null 2>&1 && [ -n "$input" ]; then
+    model="$(printf '%s' "$input" | jq -r '.model.display_name // .model.id // empty')"
+    cwd="$(printf '%s' "$input" | jq -r '.cwd // .workspace.current_dir // empty')"
+    repo_name="$(printf '%s' "$input" | jq -r '.workspace.repo.name // empty')"
+    ctx_raw="$(printf '%s' "$input" | jq -r '.context_window.used_percentage // empty')"
+fi
+
+project="${CLAUDE_SANDBOX_PROJECT_NAME:-}"
+[ -z "$project" ] && project="$repo_name"
+[ -z "$project" ] && [ -n "$cwd" ] && project="$(basename "$cwd")"
+[ -z "$project" ] && project="unknown"
+
+branch=""
+if [ -n "$cwd" ] && [ -d "$cwd" ] && command -v git >/dev/null 2>&1; then
+    branch="$(git -C "$cwd" branch --show-current)"
+fi
+
+# Normalise context-used: accept either 0..1 fraction or 0..100 percent.
+ctx_pct=""
+if [ -n "$ctx_raw" ]; then
+    ctx_pct="$(awk -v v="$ctx_raw" 'BEGIN{
+        if (v == "" || v+0 != v) exit;
+        p = v + 0;
+        if (p > 0 && p <= 1) p *= 100;
+        printf "%d", p;
+    }')"
+fi
+
+parts=("sandbox" "$project")
+[ -n "$branch" ] && parts+=("$branch")
+[ -n "$model" ]  && parts+=("$model")
+[ -n "$ctx_pct" ] && parts+=("${ctx_pct}%")
+
+out="${parts[0]}"
+for p in "${parts[@]:1}"; do
+    out="${out} / ${p}"
+done
+printf '%s\n' "$out"
+exit 0

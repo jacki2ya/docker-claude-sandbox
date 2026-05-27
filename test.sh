@@ -121,6 +121,12 @@ fi
 # ----- in-container checks (via launcher passthrough) -----
 section "Container environment"
 
+TEST_DIR_BASENAME="$(basename "$TEST_DIR")"
+# Hostname derivation must match the launcher's HOSTNAME_SAFE logic.
+EXPECTED_HOSTNAME="$(printf '%s' "$TEST_DIR_BASENAME" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' \
+    | sed -E 's/^-+//; s/-+$//' | cut -c1-63)"
+[ -z "$EXPECTED_HOSTNAME" ] && EXPECTED_HOSTNAME="sandbox"
+
 CONTAINER_OUT="$("$LAUNCHER" "$TEST_DIR" -- bash -c '
     echo "WHOAMI=$(whoami)"
     echo "UID=$(id -u)"
@@ -135,6 +141,19 @@ CONTAINER_OUT="$("$LAUNCHER" "$TEST_DIR" -- bash -c '
     echo "HOST_USERS_VISIBLE=$([ -d /Users ] && echo yes || echo no)"
     echo "CLAUDE_BIN=$(command -v claude || echo missing)"
     echo "SUDO_NOPASSWD=$(sudo -n true 2>/dev/null && echo yes || echo no)"
+    # --- self-awareness baked into the image ---
+    # Meaningful hostname (vs random hash) and project-name env var; both come
+    # from the launcher. Statusline script + baked settings.json + baked
+    # CLAUDE.md come from the Dockerfile.
+    echo "HOSTNAME=$(hostname)"
+    echo "PROJECT_NAME_ENV=${CLAUDE_SANDBOX_PROJECT_NAME:-unset}"
+    echo "STATUSLINE_EXEC=$([ -x /usr/local/bin/claude-statusline ] && echo yes || echo no)"
+    echo "STATUSLINE_OUTPUT=$(printf %s "{\"model\":{\"display_name\":\"X\"},\"cwd\":\"/workspace\"}" | /usr/local/bin/claude-statusline 2>/dev/null)"
+    echo "BAKED_CLAUDE_MD=$([ -f "$HOME/.claude/CLAUDE.md" ] && echo yes || echo no)"
+    echo "BAKED_CLAUDE_MD_OWNER_UID=$(stat -c %u "$HOME/.claude/CLAUDE.md" 2>/dev/null || echo none)"
+    echo "BAKED_CLAUDE_MD_MENTIONS_SANDBOX=$(grep -q "claude-sandbox" "$HOME/.claude/CLAUDE.md" 2>/dev/null && echo yes || echo no)"
+    # Read baked settings BEFORE the writability test overwrites it.
+    echo "BAKED_STATUSLINE_COMMAND=$(jq -r ".statusLine.command // empty" "$HOME/.claude/settings.json" 2>/dev/null)"
     # --- host-config isolation checks ---
     # ~/.claude-sandbox/ on the host holds the OAuth token; must not appear
     # in the container. The full host ~/.claude/projects/ tree must also
@@ -147,9 +166,6 @@ CONTAINER_OUT="$("$LAUNCHER" "$TEST_DIR" -- bash -c '
     # guard worked) and not actually be the host ~/.claude.
     echo "CLAUDE_DIR_OWNER_UID=$(stat -c %u "$HOME/.claude" 2>/dev/null || echo none)"
     echo "SETTINGS_WRITE=$(echo "{}" > "$HOME/.claude/settings.json" 2>/dev/null && echo ok || echo failed)"
-    # No host CLAUDE.md leaks at user level (the host user does not currently
-    # have one, but if they did it must not appear here).
-    echo "USER_CLAUDE_MD_PRESENT=$([ -f "$HOME/.claude/CLAUDE.md" ] && echo yes || echo no)"
     # Mount surface: only /workspace and /home/claude/.claude/projects/-workspace
     # should be bind-mounted into the container. Anything else is a leak.
     BIND_MOUNTS="$(awk '"'"'$5 ~ /^\/(workspace|home\/claude\/\.claude)/ {print $5}'"'"' /proc/self/mountinfo | sort -u | tr "\n" "," | sed "s/,$//")"
@@ -178,13 +194,30 @@ check_kv WORKSPACE_SENTINEL "$SENTINEL_CONTENT"
 check_kv WORKSPACE_WRITE ok
 check_kv HOST_USERS_VISIBLE no
 check_kv SUDO_NOPASSWD yes
+check_kv HOSTNAME "$EXPECTED_HOSTNAME"
+check_kv PROJECT_NAME_ENV "$TEST_DIR_BASENAME"
+check_kv STATUSLINE_EXEC yes
+check_kv BAKED_CLAUDE_MD yes
+check_kv BAKED_CLAUDE_MD_OWNER_UID 1000
+check_kv BAKED_CLAUDE_MD_MENTIONS_SANDBOX yes
+check_kv BAKED_STATUSLINE_COMMAND /usr/local/bin/claude-statusline
 check_kv OAUTH_TOKEN_FILE_LEAKED no
 check_kv SANDBOX_DIR_LEAKED no
 check_kv PROJECTS_SIBLINGS_VISIBLE "-workspace,"
 check_kv CLAUDE_DIR_OWNER_UID 1000
 check_kv SETTINGS_WRITE ok
-check_kv USER_CLAUDE_MD_PRESENT no
 check_kv BIND_MOUNTS "/home/claude/.claude/projects/-workspace,/workspace"
+
+# Statusline output: must start with literal "sandbox" tag and contain the
+# project name (basename of TEST_DIR, which is what the launcher passes via
+# CLAUDE_SANDBOX_PROJECT_NAME).
+STATUSLINE_OUT="$(printf '%s\n' "$CONTAINER_OUT" | grep -E '^STATUSLINE_OUTPUT=' | head -1 | cut -d= -f2-)"
+if printf '%s' "$STATUSLINE_OUT" | grep -qE "^sandbox / " && \
+   printf '%s' "$STATUSLINE_OUT" | grep -qF "$TEST_DIR_BASENAME"; then
+    pass "claude-statusline emits 'sandbox / <project> / …' ($STATUSLINE_OUT)"
+else
+    fail "claude-statusline output" "expected leading 'sandbox / …' + '$TEST_DIR_BASENAME', got: '$STATUSLINE_OUT'"
+fi
 
 CLAUDE_BIN="$(printf '%s\n' "$CONTAINER_OUT" | grep -E '^CLAUDE_BIN=' | head -1 | cut -d= -f2-)"
 if [ -n "$CLAUDE_BIN" ] && [ "$CLAUDE_BIN" != "missing" ]; then
