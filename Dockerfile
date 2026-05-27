@@ -42,7 +42,14 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY bin/claude-statusline /usr/local/bin/claude-statusline
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/claude-statusline
+
+# Baked under ~/.claude/ as siblings of the runtime bind-mount
+# (~/.claude/projects/-workspace). --chown lets the entrypoint's
+# non-recursive ownership reclaim skip them.
+COPY --chown=$USER_UID:$USER_GID image/claude-home-settings.json /home/$USERNAME/.claude/settings.json
+COPY --chown=$USER_UID:$USER_GID image/claude-home-CLAUDE.md     /home/$USERNAME/.claude/CLAUDE.md
 
 USER $USERNAME
 WORKDIR /workspace

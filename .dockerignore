@@ -1,4 +1,5 @@
-# The image only needs entrypoint.sh; keep the rest out of the build context.
+# The image only needs entrypoint.sh, image/, and bin/claude-statusline
+# (the in-container status line script). Everything else stays out.
 .git
 .gitignore
 .dockerignore
@@ -7,3 +8,4 @@ LICENSE
 install.sh
 test.sh
 bin
+!bin/claude-statusline
