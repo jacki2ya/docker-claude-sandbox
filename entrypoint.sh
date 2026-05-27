@@ -34,4 +34,23 @@ if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 
-exec claude --dangerously-skip-permissions
+MODEL="${CLAUDE_SANDBOX_MODEL:-claude-opus-4-7}"
+
+if [ -z "$MODEL" ]; then
+    exec claude --dangerously-skip-permissions
+fi
+
+# Try the preferred model; if it exits quickly with a non-zero code (e.g. the model
+# was retired), fall back to Claude's current default rather than hard-failing.
+START_TIME=$(date +%s)
+claude --dangerously-skip-permissions --model "$MODEL" || {
+    EXIT_CODE=$?
+    DURATION=$(( $(date +%s) - START_TIME ))
+    # 130 = SIGINT (Ctrl-C): user quit intentionally, don't retry.
+    # >10s: real session that ended badly, don't retry.
+    if [ "$EXIT_CODE" -ne 130 ] && [ "$DURATION" -lt 10 ]; then
+        echo "WARN: claude exited ($EXIT_CODE) within ${DURATION}s using model '$MODEL' — model may be unavailable; retrying with default model" >&2
+        exec claude --dangerously-skip-permissions
+    fi
+    exit "$EXIT_CODE"
+}
