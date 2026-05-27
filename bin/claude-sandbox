@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMAGE="${CLAUDE_SANDBOX_IMAGE:-claude-sandbox:latest}"
+TOKEN_FILE="${CLAUDE_SANDBOX_TOKEN_FILE:-$HOME/.claude-sandbox/oauth-token}"
+MEMORY="${CLAUDE_SANDBOX_MEMORY:-8g}"
+CPUS="${CLAUDE_SANDBOX_CPUS:-4}"
+PIDS="${CLAUDE_SANDBOX_PIDS:-1024}"
+
+usage() {
+    cat <<EOF
+Usage: claude-sandbox [OPTIONS] [PROJECT_DIR] [-- CMD...]
+
+Run Claude Code in an isolated Docker container with
+--dangerously-skip-permissions enabled.
+
+OPTIONS:
+  --shell        Drop into bash inside the container instead of starting Claude
+  -h, --help     Show this help
+
+PROJECT_DIR defaults to the current directory and is bind-mounted at /workspace.
+
+Anything after '--' is passed through to the entrypoint as a command override,
+e.g. 'claude-sandbox -- claude --help'.
+
+Environment overrides:
+  CLAUDE_SANDBOX_IMAGE        Image tag         (default: claude-sandbox:latest)
+  CLAUDE_SANDBOX_TOKEN_FILE   OAuth token path  (default: ~/.claude-sandbox/oauth-token)
+  CLAUDE_SANDBOX_MEMORY       Memory limit      (default: 8g)
+  CLAUDE_SANDBOX_CPUS         CPU limit         (default: 4)
+  CLAUDE_SANDBOX_PIDS         Max processes     (default: 1024)
+
+First-time setup:
+  1. claude setup-token      # on the host, generates a long-lived OAuth token
+  2. mkdir -p ~/.claude-sandbox && chmod 700 ~/.claude-sandbox
+  3. printf '%s' 'PASTE_TOKEN' > ~/.claude-sandbox/oauth-token
+     chmod 600 ~/.claude-sandbox/oauth-token
+EOF
+}
+
+MODE="claude"
+PROJECT_DIR=""
+PASSTHROUGH=()
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --shell)
+            MODE="shell"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            PASSTHROUGH=("$@")
+            break
+            ;;
+        -*)
+            echo "ERROR: unknown flag: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+        *)
+            if [ -n "$PROJECT_DIR" ]; then
+                echo "ERROR: only one PROJECT_DIR argument allowed (got: '$PROJECT_DIR' and '$1')" >&2
+                exit 2
+            fi
+            PROJECT_DIR="$1"
+            shift
+            ;;
+    esac
+done
+
+PROJECT_DIR="${PROJECT_DIR:-$PWD}"
+if [ ! -d "$PROJECT_DIR" ]; then
+    echo "ERROR: project directory does not exist: $PROJECT_DIR" >&2
+    exit 1
+fi
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+
+if [ ! -f "$TOKEN_FILE" ]; then
+    cat >&2 <<EOF
+ERROR: OAuth token file not found at: $TOKEN_FILE
+
+First-time setup:
+  1. claude setup-token        # generates a long-lived OAuth token
+  2. mkdir -p "$(dirname "$TOKEN_FILE")" && chmod 700 "$(dirname "$TOKEN_FILE")"
+  3. printf '%s' 'PASTE_TOKEN' > "$TOKEN_FILE"
+     chmod 600 "$TOKEN_FILE"
+  4. re-run claude-sandbox.
+EOF
+    exit 1
+fi
+
+CLAUDE_CODE_OAUTH_TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
+if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    echo "ERROR: token file is empty: $TOKEN_FILE" >&2
+    exit 1
+fi
+export CLAUDE_CODE_OAUTH_TOKEN
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "ERROR: docker not found on PATH" >&2
+    exit 1
+fi
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    cat >&2 <<EOF
+ERROR: Docker image not found: $IMAGE
+
+Build it from the project root:
+  ./install.sh
+or:
+  docker build -t $IMAGE .
+EOF
+    exit 1
+fi
+
+GIT_NAME="$(git config --global user.name 2>/dev/null || true)"
+GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
+
+SAFE_BASENAME="$(basename "$PROJECT_DIR" | tr -c 'A-Za-z0-9._-' '-')"
+CONTAINER_NAME="claude-sandbox-${SAFE_BASENAME}-$$"
+
+DOCKER_ARGS=(run --rm -i)
+if [ -t 0 ] && [ -t 1 ]; then
+    DOCKER_ARGS+=(-t)
+fi
+DOCKER_ARGS+=(
+    --init
+    --name "$CONTAINER_NAME"
+    --memory "$MEMORY"
+    --cpus "$CPUS"
+    --pids-limit "$PIDS"
+    --workdir /workspace
+    -v "$PROJECT_DIR:/workspace"
+    -e CLAUDE_CODE_OAUTH_TOKEN
+    -e "GIT_AUTHOR_NAME=$GIT_NAME"
+    -e "GIT_AUTHOR_EMAIL=$GIT_EMAIL"
+    -e "GIT_COMMITTER_NAME=$GIT_NAME"
+    -e "GIT_COMMITTER_EMAIL=$GIT_EMAIL"
+)
+
+if [ "${#PASSTHROUGH[@]}" -gt 0 ]; then
+    exec docker "${DOCKER_ARGS[@]}" "$IMAGE" "${PASSTHROUGH[@]}"
+elif [ "$MODE" = "shell" ]; then
+    exec docker "${DOCKER_ARGS[@]}" "$IMAGE" bash
+else
+    exec docker "${DOCKER_ARGS[@]}" "$IMAGE"
+fi

@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Editor/IDE
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local secrets — the launcher reads the OAuth token from ~/.claude-sandbox,
+# but guard against anyone keeping a copy in-repo.
+*oauth-token*
+.claude-sandbox/

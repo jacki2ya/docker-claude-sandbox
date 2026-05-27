@@ -1,0 +1,9 @@
+# The image only needs entrypoint.sh; keep the rest out of the build context.
+.git
+.gitignore
+.dockerignore
+README.md
+LICENSE
+install.sh
+test.sh
+bin
