@@ -1,0 +1,50 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: end-to-end (build image + test.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The launcher forwards the host's global git identity into the container,
+      # and test.sh asserts GIT_AUTHOR_NAME_SET=yes / GIT_AUTHOR_EMAIL_SET=yes.
+      # CI runners have no global identity, so set one.
+      - name: Configure git identity (forwarded into container)
+        run: |
+          git config --global user.name "claude-sandbox CI"
+          git config --global user.email "ci@claude-sandbox.invalid"
+
+      - name: Build sandbox image
+        run: docker build -t claude-sandbox:latest .
+
+      # test.sh and the launcher both require a non-empty token file at the
+      # default path. With SKIP_AUTH=1 the value is never used, so a dummy is
+      # fine. If a CLAUDE_CODE_OAUTH_TOKEN secret is configured, run the full
+      # suite (including the live API call) instead.
+      - name: Run end-to-end tests
+        env:
+          CLAUDE_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          mkdir -p ~/.claude-sandbox && chmod 700 ~/.claude-sandbox
+          if [ -n "$CLAUDE_TOKEN" ]; then
+            printf '%s' "$CLAUDE_TOKEN" > ~/.claude-sandbox/oauth-token
+            chmod 600 ~/.claude-sandbox/oauth-token
+            echo "::notice::CLAUDE_CODE_OAUTH_TOKEN secret present — running full suite incl. live API call"
+            SKIP_AUTH=0 ./test.sh
+          else
+            printf '%s' 'ci-dummy-token-unused-when-skip-auth' > ~/.claude-sandbox/oauth-token
+            chmod 600 ~/.claude-sandbox/oauth-token
+            echo "::notice::No CLAUDE_CODE_OAUTH_TOKEN secret — running with SKIP_AUTH=1 (live API call skipped)"
+            SKIP_AUTH=1 ./test.sh
+          fi
