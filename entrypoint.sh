@@ -44,7 +44,7 @@ if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 
-MODEL="${CLAUDE_SANDBOX_MODEL:-claude-opus-4-7}"
+MODEL="${CLAUDE_SANDBOX_MODEL:-claude-opus-4-8}"
 
 if [ -z "$MODEL" ]; then
     exec claude --dangerously-skip-permissions
