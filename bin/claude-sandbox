@@ -125,7 +125,7 @@ fi
 GIT_NAME="$(git config --global user.name 2>/dev/null || true)"
 GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
 
-SAFE_BASENAME="$(basename "$PROJECT_DIR" | tr -c 'A-Za-z0-9._-' '-')"
+SAFE_BASENAME="$(printf '%s' "$(basename "$PROJECT_DIR")" | tr -c 'A-Za-z0-9._-' '-')"
 CONTAINER_NAME="claude-sandbox-${SAFE_BASENAME}-$$"
 
 # Status line and the in-container env hint surface this name; default to the
