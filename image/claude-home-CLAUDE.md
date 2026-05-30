@@ -31,11 +31,20 @@ the user to remind you of them.
   safety boundary, not the permission prompt.
 - Outbound network is unrestricted.
 
-## Git: commit yes, push no
+## Git: commit, and push if a GitHub PAT is configured
 
-- No SSH keys or host git credentials are mounted. `git commit` works
-  (author identity is forwarded from the host). **`git push` will fail** —
-  do not attempt it. The user will push from the host themselves.
+- No SSH keys are mounted. Author identity is forwarded from the host, so
+  `git commit` works.
+- **GitHub push/pull**: works iff `GITHUB_TOKEN` is set in the env (the
+  launcher mounts it from `~/.claude-sandbox/github-token` on the host).
+  A git credential helper scoped to `github.com` serves the PAT, and
+  `git@github.com:` / `ssh://git@github.com/` URLs are auto-rewritten to
+  HTTPS — so existing SSH remotes and `terraform init` on
+  `git::ssh://git@github.com/...` modules both Just Work. If
+  `GITHUB_TOKEN` is empty, GitHub push will fail; check for it before
+  trying. `gh` CLI is installed and picks up `GH_TOKEN` automatically.
+- **Other remotes** (GitLab, self-hosted git, etc.) are unaffected by
+  the GitHub helper — auth them however that project normally does.
 - The repo in `/workspace` IS the host's working tree (same inode), so
   commits you create are immediately visible on the host.
 
@@ -43,9 +52,10 @@ the user to remind you of them.
 
 - Don't suggest "I'll install X globally so it's always available" — it won't
   be next session. Install into the project or document the apt command.
-- Don't try to push branches, open PRs via SSH remotes, or configure git
-  credentials. Hand off to the user for anything that requires auth to a
-  remote.
+- For GitHub: check `GITHUB_TOKEN` is set before assuming push works. If
+  it isn't, hand off to the user rather than fighting auth. Don't reconfigure
+  the global git credential helper — it's already wired correctly when a
+  PAT is present.
 - Don't worry about polluting the user's host home directory by writing to
   `~` — it's ephemeral. But auto-memory under `~/.claude/projects/-workspace`
   IS visible to host sessions, so keep entries useful and project-relevant.

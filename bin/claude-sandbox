@@ -3,6 +3,7 @@ set -euo pipefail
 
 IMAGE="${CLAUDE_SANDBOX_IMAGE:-claude-sandbox:latest}"
 TOKEN_FILE="${CLAUDE_SANDBOX_TOKEN_FILE:-$HOME/.claude-sandbox/oauth-token}"
+GITHUB_TOKEN_FILE="${CLAUDE_SANDBOX_GITHUB_TOKEN_FILE:-$HOME/.claude-sandbox/github-token}"
 PROJECTS_DIR="${CLAUDE_SANDBOX_PROJECTS_DIR:-$HOME/.claude/projects}"
 MEMORY="${CLAUDE_SANDBOX_MEMORY:-8g}"
 CPUS="${CLAUDE_SANDBOX_CPUS:-4}"
@@ -28,6 +29,7 @@ e.g. 'claude-sandbox -- claude --help'.
 Environment overrides:
   CLAUDE_SANDBOX_IMAGE        Image tag         (default: claude-sandbox:latest)
   CLAUDE_SANDBOX_TOKEN_FILE    OAuth token path     (default: ~/.claude-sandbox/oauth-token)
+  CLAUDE_SANDBOX_GITHUB_TOKEN_FILE GitHub PAT path  (default: ~/.claude-sandbox/github-token; optional)
   CLAUDE_SANDBOX_PROJECTS_DIR  Host CC projects dir (default: ~/.claude/projects)
   CLAUDE_SANDBOX_MEMORY       Memory limit      (default: 8g)
   CLAUDE_SANDBOX_CPUS         CPU limit         (default: 4)
@@ -105,6 +107,19 @@ if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
 fi
 export CLAUDE_CODE_OAUTH_TOKEN
 
+# Optional GitHub PAT for git push + terraform pulls of private repos.
+# When absent, sandbox still runs; only github.com auth is unavailable inside.
+GITHUB_TOKEN=""
+if [ -s "$GITHUB_TOKEN_FILE" ]; then
+    GITHUB_TOKEN="$(tr -d '\r\n' < "$GITHUB_TOKEN_FILE")"
+fi
+if [ -z "$GITHUB_TOKEN" ] && [ ! -f "$GITHUB_TOKEN_FILE" ]; then
+    echo "WARN: no GitHub PAT at $GITHUB_TOKEN_FILE — git push to github.com and terraform pulls of private GitHub modules will fail inside the sandbox." >&2
+fi
+export GITHUB_TOKEN
+GH_TOKEN="$GITHUB_TOKEN"
+export GH_TOKEN
+
 if ! command -v docker >/dev/null 2>&1; then
     echo "ERROR: docker not found on PATH" >&2
     exit 1
@@ -165,6 +180,8 @@ DOCKER_ARGS+=(
     -v "$PROJECT_DIR:/workspace"
     -v "$HOST_SLUG_DIR:/home/claude/.claude/projects/-workspace"
     -e CLAUDE_CODE_OAUTH_TOKEN
+    -e GITHUB_TOKEN
+    -e GH_TOKEN
     -e "CLAUDE_SANDBOX_MODEL=$MODEL"
     -e "CLAUDE_SANDBOX_PROJECT_NAME=$PROJECT_NAME"
     -e "GIT_AUTHOR_NAME=$GIT_NAME"
