@@ -40,6 +40,18 @@ if [ ! -f "$HOME/.claude.json" ]; then
 JSON
 fi
 
+# If a GitHub PAT was passed in, wire it into git for github.com only and
+# auto-rewrite SSH-form URLs to HTTPS so existing git@github.com / ssh://
+# remotes and terraform `git::ssh://git@github.com/...` modules Just Work.
+# The credential helper reads $GITHUB_TOKEN at request time, so the token
+# never lands on disk inside the container.
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    git config --global credential.https://github.com.helper \
+        '!f() { test "$1" = get && printf "username=x-access-token\npassword=%s\n" "$GITHUB_TOKEN"; }; f'
+    git config --global --add url.https://github.com/.insteadOf git@github.com:
+    git config --global --add url.https://github.com/.insteadOf ssh://git@github.com/
+fi
+
 if [ "$#" -gt 0 ]; then
     exec "$@"
 fi

@@ -69,6 +69,7 @@ claude-sandbox -- claude --help
 |---|---|---|
 | `CLAUDE_SANDBOX_IMAGE` | `claude-sandbox:latest` | Image tag to run |
 | `CLAUDE_SANDBOX_TOKEN_FILE` | `~/.claude-sandbox/oauth-token` | Host path to the OAuth token |
+| `CLAUDE_SANDBOX_GITHUB_TOKEN_FILE` | `~/.claude-sandbox/github-token` | Host path to an optional GitHub PAT (see [GitHub auth](#github-auth)) |
 | `CLAUDE_SANDBOX_PROJECTS_DIR` | `~/.claude/projects` | Host Claude Code **projects** dir to share memory + transcripts with |
 | `CLAUDE_SANDBOX_PROJECT_NAME` | basename of `PROJECT_DIR` | Project label passed into the container (status line, env hint); auto-set by the launcher, override only if you want a custom display name |
 | `CLAUDE_SANDBOX_MEMORY` | `8g` | Container memory limit |
@@ -80,6 +81,7 @@ claude-sandbox -- claude --help
 - Debian bookworm-slim base
 - Node.js LTS, Python 3, build-essential
 - git, curl, wget, jq, ripgrep, fd, vim-tiny, nano, openssh-client
+- `gh` (GitHub CLI, official cli.github.com APT repo)
 - Infra/secrets tooling: `terraform` (HashiCorp APT repo), `sops` (pinned
   binary, `SOPS_VERSION` build-arg overrides), `age`
 - `@anthropic-ai/claude-code` (npm global)
@@ -183,12 +185,46 @@ slug dirs, and the runtime/cache/telemetry subdirs (`sessions/`, `todos/`,
 If you `npm install` or `pip install` inside the container it goes away —
 install into the project directory (`node_modules/`, a venv) so it survives.
 
-## Pushing to git
+## GitHub auth
 
 There is intentionally no `~/.ssh` mount and no host credential helper inside
-the container. Commit inside the sandbox; push from the host. If this gets
-annoying, the cleanest next step is a short-lived GitHub token passed as an
-env var rather than mounting SSH keys.
+the container. To let the sandbox push to GitHub (and let `terraform init`
+pull private GitHub modules), mount a GitHub Personal Access Token via the
+same host-file pattern as the OAuth token.
+
+**One-time setup:**
+
+1. Mint a [fine-grained PAT](https://github.com/settings/personal-access-tokens)
+   scoped to only the repos the sandbox needs. Required permissions for
+   typical use: `Contents: Read and write` (for push), `Metadata: Read-only`.
+2. Save it next to the OAuth token:
+
+   ```sh
+   printf '%s' 'PASTE_PAT' > ~/.claude-sandbox/github-token
+   chmod 600 ~/.claude-sandbox/github-token
+   ```
+
+That's it. Inside the sandbox:
+
+- `GITHUB_TOKEN` and `GH_TOKEN` are set from that file.
+- A git credential helper scoped to `github.com` serves the PAT — the token
+  is read from `$GITHUB_TOKEN` at request time and never lands on disk in
+  the container.
+- `git@github.com:` and `ssh://git@github.com/` URLs are auto-rewritten to
+  `https://github.com/` globally (only inside the container), so existing
+  SSH remotes work without editing them and `terraform init` resolves
+  `git::ssh://git@github.com/foo/bar` against the PAT too.
+- `gh` CLI picks up `GH_TOKEN` automatically — no `gh auth login` needed.
+- Auth to other hosts (GitLab, etc.) is untouched.
+
+The file is **optional**. If it's missing, the sandbox still launches; you
+just get a one-line warning that GitHub-side git ops won't work, matching
+the old behaviour.
+
+**Threat model:** the PAT lives in the container's env, so it's readable
+from `/proc/<pid>/environ` by anything in the container — same model as
+the Claude OAuth token. Rotate by overwriting the file and restarting the
+sandbox; bound blast radius by keeping the PAT fine-grained.
 
 ## Troubleshooting
 
